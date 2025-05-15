@@ -3,6 +3,8 @@ const db = require('../db');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const router = express.Router();
+const fs = require('fs'); // 파일 시스템 모듈
+const path = require('path');
 
 // 1. 패키지 추가
 const multer  = require('multer')
@@ -14,22 +16,50 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-router.post('/upload', upload.single('file'), async (req, res) => {
-    let {email} = req.body;
-    const filename = req.file.filename; 
-    const destination = req.file.destination; 
-    try{
-        let query = "UPDATE TBL_MEMBER SET PROFILEIMG = ? WHERE EMAIL = ?";
-        let result = await db.query(query, [destination+filename, email]);
+router.patch('/update', upload.single('profileImg'), async (req, res) => {
+    const { email, username, bio } = req.body;
+    const filename = req.file ? req.file.filename : null; 
+    const destination = req.file ? req.file.destination : null;
+    let filePath = null;
+
+    if (filename && destination) {
+        filePath = path.join(destination, filename);
+    }
+
+    try {
+        // 기존 프로필 이미지 경로 조회
+        const [prevImgResult] = await db.query("SELECT PROFILEIMG FROM USERS WHERE EMAIL = ?", [email]);
+        const prevImgPath = prevImgResult[0]?.PROFILEIMG;
+
+        // 새 이미지가 업로드된 경우에만 기존 이미지 삭제
+        if (req.file && prevImgPath && fs.existsSync(prevImgPath)) {
+            fs.unlinkSync(prevImgPath);
+        }
+
+        if (filePath) {
+            // 새 이미지 포함 업데이트
+            await db.query(
+                "UPDATE USERS SET USERNAME = ?, BIO = ?, PROFILEIMG = ? WHERE EMAIL = ?",
+                [username, bio, filePath, email]
+            );
+        } else {
+            // 이미지 없이 username과 bio만 업데이트
+            await db.query(
+                "UPDATE USERS SET USERNAME = ?, BIO = ? WHERE EMAIL = ?",
+                [username, bio, email]
+            );
+        }
+
         res.json({
-            message : "result",
-            result : result
+            message: "Profile updated successfully",
+            result: "success"
         });
-    } catch(err){
-        console.log("에러 발생!");
+    } catch (err) {
+        console.error("Error occurred:", err);
         res.status(500).send("Server Error");
     }
 });
+
 
 const JWT_KEY = "show-me-the-money";
 router.post("/", async (req, res) => {
@@ -74,7 +104,7 @@ router.post("/", async (req, res) => {
 router.get("/:email", async (req, res) => {
     let { email } = req.params;
     try{
-        let [list] = await db.query("SELECT * FROM TBL_MEMBER WHERE EMAIL = '" + email + "'");
+        let [list] = await db.query("SELECT * FROM USERS WHERE EMAIL = '" + email + "'");
         res.json({
             message : "result",
             info : list[0]
